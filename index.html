@@ -607,7 +607,7 @@ function renderUserAnswerBlock(item, idx){
     return `<div style="margin-top:10px;font-size:13px;color:var(--muted);">아직 답변이 등록되지 않았습니다.</div>`;
   }
   return `
-    <div class="pw-row" onclick="event.stopPropagation()">
+    <div class="pw-row" >
       <input type="password" placeholder="답변 확인 비밀번호" id="pw-${idx}">
       <button class="mini-btn" data-check="${idx}">답변 확인</button>
     </div>
@@ -621,7 +621,7 @@ function renderAdminAnswerBlock(item, idx){
     return `<div class="answer-box">${escapeHtml(item.answer||'')}</div>`;
   }
   return `
-    <div onclick="event.stopPropagation()">
+    <div >
       <textarea id="admintxt-${idx}" placeholder="답변을 입력하세요"></textarea>
       <button class="mini-btn" style="margin-top:8px;" data-answer="${idx}">답변 등록</button>
       <div class="msg" id="adminmsg-${idx}"></div>
