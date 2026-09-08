@@ -291,6 +291,7 @@
       <a href="#about">대회소개</a>
       <a href="#schedule">일정</a>
       <a href="#apply-info">참가안내</a>
+      <a href="#notice">공지사항</a>
       <a href="#board">문의하기</a>
     </nav>
     <a href="#apply-info" class="navbtn">신청하기</a>
@@ -450,6 +451,21 @@
   </div>
 </section>
 
+<section id="notice" class="section-alt">
+  <div class="wrap">
+    <div class="kicker">NOTICE</div>
+    <h2 class="sec-title">공지사항</h2>
+    <p class="sec-desc">대회 관련 주요 소식과 안내사항을 확인하세요.</p>
+
+    <div class="board-toolbar">
+      <div style="font-size:13px;color:var(--muted);" id="noticeCount">공지 목록을 불러오는 중...</div>
+      <button class="btn btn-primary" style="padding:10px 20px;font-size:14px;display:none;" id="noticeWriteBtn">공지 작성</button>
+    </div>
+
+    <div class="board-list" id="noticeList"></div>
+  </div>
+</section>
+
 <section id="board" class="section-alt">
   <div class="wrap">
     <div class="kicker">Q&amp;A</div>
@@ -484,6 +500,20 @@
   </div>
 </div>
 
+<!-- 공지 작성 모달 -->
+<div class="modal-overlay" id="noticeModal">
+  <div class="modal">
+    <h3>공지 작성</h3>
+    <div class="field"><label>제목</label><input type="text" id="nTitle" placeholder="공지 제목"></div>
+    <div class="field"><label>내용</label><textarea id="nContent" placeholder="공지 내용을 입력해주세요"></textarea></div>
+    <div class="msg" id="noticeMsg"></div>
+    <div class="modal-actions">
+      <button class="mini-btn secondary" id="noticeCancel">취소</button>
+      <button class="mini-btn" id="noticeSubmit">등록하기</button>
+    </div>
+  </div>
+</div>
+
 <!-- 관리자 로그인 모달 -->
 <div class="modal-overlay" id="adminLoginModal">
   <div class="modal">
@@ -508,7 +538,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getFirestore, collection, addDoc, getDocs, doc, updateDoc,
+  getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
   query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
@@ -524,6 +554,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const inquiriesRef = collection(db, "inquiries");
+const noticesRef = collection(db, "notices");
 
 // ---- utils ----
 async function sha256(text){
@@ -541,6 +572,7 @@ const ADMIN_PW_HASH_PROMISE = sha256("1031");
 // ---- state ----
 let allDocs = [];
 let isAdmin = false;
+let allNotices = [];
 
 async function loadBoard(){
   const boardList = document.getElementById('boardList');
@@ -611,6 +643,47 @@ function renderAdminAnswerBlock(item, idx){
       <div class="msg" id="adminmsg-${idx}"></div>
     </div>
   `;
+}
+
+async function loadNotices(){
+  const noticeCount = document.getElementById('noticeCount');
+  try{
+    const q = query(noticesRef, orderBy('createdAt','desc'));
+    const snap = await getDocs(q);
+    allNotices = [];
+    snap.forEach(d => allNotices.push({id:d.id, ...d.data()}));
+    noticeCount.textContent = `전체 ${allNotices.length}건`;
+    renderNotices();
+  }catch(e){
+    noticeCount.textContent = '공지 목록을 불러오지 못했습니다.';
+    console.error(e);
+  }
+}
+
+function renderNotices(){
+  const noticeList = document.getElementById('noticeList');
+  const noticeWriteBtn = document.getElementById('noticeWriteBtn');
+  if(noticeWriteBtn) noticeWriteBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  if(!noticeList) return;
+  noticeList.innerHTML = '';
+  if(allNotices.length === 0){
+    noticeList.innerHTML = '<div style="color:var(--muted);font-size:14px;padding:20px 0;">등록된 공지사항이 없습니다.</div>';
+    return;
+  }
+  allNotices.forEach((item, idx) => {
+    const row = document.createElement('div');
+    row.className = 'board-row';
+    row.style.cursor = 'default';
+    row.innerHTML = `
+      <div class="row-top">
+        <div class="row-title">${escapeHtml(item.title||'')}</div>
+        <div style="font-size:12.5px;color:var(--muted);white-space:nowrap;">${fmtDate(item.createdAt)}</div>
+      </div>
+      <div style="margin-top:10px;white-space:pre-wrap;font-size:14.5px;">${escapeHtml(item.content||'')}</div>
+      ${isAdmin ? `<button class="mini-btn secondary" style="margin-top:12px;" data-del-notice="${idx}">삭제</button>` : ''}
+    `;
+    noticeList.appendChild(row);
+  });
 }
 
 function escapeHtml(str){
@@ -707,6 +780,7 @@ document.getElementById('adminOpenBtn').addEventListener('click', () => {
     isAdmin = false;
     document.getElementById('adminOpenBtn').textContent = '관리자';
     renderBoard();
+    renderNotices();
     return;
   }
   adminModal.classList.add('show');
@@ -726,13 +800,57 @@ document.getElementById('adminSubmit').addEventListener('click', async () => {
     document.getElementById('adminPw').value='';
     msgEl.textContent='';
     renderBoard();
+    renderNotices();
   }else{
     msgEl.textContent='비밀번호가 올바르지 않습니다.'; msgEl.className='msg err';
   }
 });
 
+// ---- notice list: delete (admin) ----
+document.getElementById('noticeList').addEventListener('click', async (e) => {
+  const delIdx = e.target.getAttribute('data-del-notice');
+  if(delIdx === null) return;
+  if(!confirm('이 공지사항을 삭제하시겠습니까?')) return;
+  const item = allNotices[Number(delIdx)];
+  try{
+    await deleteDoc(doc(db, 'notices', item.id));
+    await loadNotices();
+  }catch(err){
+    console.error(err);
+    alert('삭제 중 오류가 발생했습니다.');
+  }
+});
+
+// ---- notice write modal ----
+const noticeModal = document.getElementById('noticeModal');
+document.getElementById('noticeWriteBtn').addEventListener('click', () => {
+  noticeModal.classList.add('show');
+});
+document.getElementById('noticeCancel').addEventListener('click', () => {
+  noticeModal.classList.remove('show');
+});
+document.getElementById('noticeSubmit').addEventListener('click', async () => {
+  const title = document.getElementById('nTitle').value.trim();
+  const content = document.getElementById('nContent').value.trim();
+  const msgEl = document.getElementById('noticeMsg');
+  if(!title || !content){
+    msgEl.textContent = '제목과 내용을 모두 입력해주세요.'; msgEl.className='msg err'; return;
+  }
+  try{
+    await addDoc(noticesRef, { title, content, createdAt: serverTimestamp() });
+    msgEl.textContent = '등록되었습니다.'; msgEl.className='msg ok';
+    document.getElementById('nTitle').value='';
+    document.getElementById('nContent').value='';
+    setTimeout(() => { noticeModal.classList.remove('show'); msgEl.textContent=''; }, 700);
+    await loadNotices();
+  }catch(err){
+    console.error(err);
+    msgEl.textContent = '등록 중 오류가 발생했습니다.'; msgEl.className='msg err';
+  }
+});
+
 // close modals on overlay click
-[writeModal, adminModal].forEach(m => {
+[writeModal, adminModal, noticeModal].forEach(m => {
   m.addEventListener('click', (e) => { if(e.target === m) m.classList.remove('show'); });
 });
 
@@ -745,6 +863,7 @@ document.querySelectorAll('.navlinks a').forEach(a => {
 });
 
 loadBoard();
+loadNotices();
 </script>
 </body>
 </html>
